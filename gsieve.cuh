@@ -13,6 +13,7 @@ struct List
    ~List();
 
    void Print(int size, string header = {});
+   void CopyFromAsync(const List& that, int size, cudaStream_t);
 
    Point* points;
    Norm* norms;

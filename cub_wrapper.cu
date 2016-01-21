@@ -1,4 +1,3 @@
-
 #include "cub_wrapper.cuh"
 #include "kernels.cuh"
 

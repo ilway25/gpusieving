@@ -47,6 +47,12 @@ void List::InitGPU(int size, int gpu)
    CubDebugExit(cudaMalloc(&norms, sizeof(Norm) * size));
 }
 
+void List::CopyFromAsync(const List& that, int size, cudaStream_t stream)
+{
+   CubDebugExit(cudaMemcpyAsync(points, that.points, sizeof(Point) * size, cudaMemcpyDefault, stream));
+   CubDebugExit(cudaMemcpyAsync(norms, that.norms, sizeof(Norm) * size, cudaMemcpyDefault, stream));
+}
+
 void List::Print(int size, string header)
 {
    // TODO: Clean up
@@ -161,9 +167,11 @@ void GSieve::Start()
    CubDebugExit(cudaMallocHost(&points, sizeof(Point) * NumSamples));
    CubDebugExit(cudaMallocHost(&norms, sizeof(Norm) * NumSamples));
 
+   int *new_Lsize;
+   CubDebugExit(cudaMallocHost(&new_Lsize, sizeof(int) * NGPUS));
+
    for (int iterations = 0; iterations < 1; ++iterations)
    {
-      int new_Lsize[NGPUS];
 
       cout << "====== Iteration " << iterations << " ======" << endl;
 
@@ -211,6 +219,7 @@ void GSieve::Start()
 
       for (int i = 0; i < NGPUS; ++i)
       {
+         cout << i << endl;
          CubDebugExit(cudaSetDevice(i));
 
          // Distribute
@@ -226,8 +235,10 @@ void GSieve::Start()
 
          reduce<0><<<GridDim, BlockDim, 0, streams[i]>>>(Q[i].points, Q[i].norms, NumSamples, L[i].points, L[i].norms, Lsize[i]);
 
-         CubDebugExit(cudaMemcpyAsync(Q2[i].points, Q[i].points, sizeof(Point) * NumSamples, cudaMemcpyDefault, streams[i]));
-         CubDebugExit(cudaMemcpyAsync(Q2[i].norms, Q[i].norms, sizeof(Norm) * NumSamples, cudaMemcpyDefault, streams[i]));
+         // CubDebugExit(cudaMemcpyAsync(Q2[i].points, Q[i].points, sizeof(Point) * NumSamples, cudaMemcpyDefault, streams[i]));
+         // CubDebugExit(cudaMemcpyAsync(Q2[i].norms, Q[i].norms, sizeof(Norm) * NumSamples, cudaMemcpyDefault, streams[i]));
+         Q2[i].CopyFromAsync(Q[i], NumSamples, streams[i]);
+
 
          reduce<1><<<GridDim, BlockDim, 0, streams[i]>>>(Q2[i].points, Q2[i].norms, NumSamples, Q[i].points, Q[i].norms, NumSamples);
 
@@ -245,12 +256,14 @@ void GSieve::Start()
          // Send Q to CPU
          CubDebugExit(cudaMemcpyAsync(hostQ[i].points, Q[i].points, sizeof(Point) * NumSamples, cudaMemcpyDefault, streams[i]));
          CubDebugExit(cudaMemcpyAsync(hostQ[i].norms, Q[i].norms, sizeof(Norm) * NumSamples, cudaMemcpyDefault, streams[i]));
+         hostQ[i].CopyFromAsync(Q[i], NumSamples, streams[i]);
       }
 
       for (int i = 0; i < NGPUS; ++i)
       {
          CubDebugExit(cudaSetDevice(i));
          CubDebugExit(cudaStreamSynchronize(streams[i]));
+         cout << new_Lsize[i] << endl;
       }
    }
    // CubDebugExit(cudaMemcpy(Q[0].points, S.points, 50 * sizeof(Point), cudaMemcpyDefault));
