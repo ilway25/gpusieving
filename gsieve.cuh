@@ -28,6 +28,7 @@ public:
    ~GSieve();
 
    void Start();
+   void GenerateSamples();
 
    void GoldenReduce(Point*, Norm*, size_t, const Point*, const Norm*, size_t);
 
@@ -38,8 +39,11 @@ private:
 
    fmat     _B;
 
-   List S;
-   List L[NGPUS], Q[NGPUS], Q2[NGPUS];
+   List S, hostQ[NGPUS];                // Host
+   List L[NGPUS], Q[NGPUS], Q2[NGPUS];  // Gpu
+
+   int Ssize;
+   int Lsize[NGPUS] {};
 
    cudaStream_t streams[NGPUS];
 };

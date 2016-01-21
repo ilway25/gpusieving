@@ -2,10 +2,10 @@
 
 #include <cub/util_macro.cuh>
 
-const int NGPUS = 4;
+const int NGPUS = 3;
 
 const int N = 102;
-const int RakeWidth = 1;
+const int RakeWidth = 8;
 
 // const int ILP = 2;
 const int GridDim  = 256;
@@ -26,11 +26,17 @@ using Norm = float;
 
 struct Point
 {
-   float data[Pitch] {};
+   float data[Pitch];
 
    __device__ __host__ float& operator[](size_t idx) { return data[idx]; }
    __device__ __host__ const float& operator[](size_t idx) const { return data[idx]; }
 };
 
+struct NotReduced
+{
+   __host__ __device__ bool operator()(Norm n) const { return n > 10; }
+};
+
+template <int step>
 __global__
 void reduce(Point* gs, Norm* gns, size_t g_size, const Point* hs, const Norm* hns, size_t h_size);

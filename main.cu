@@ -1,4 +1,5 @@
 #include <iostream>
+#include <fstream>
 
 #include "gsieve.cuh"
 
@@ -6,7 +7,8 @@ using namespace std;
 
 int main()
 {
-   GSieve gs("basis/basis102p", cin);
+   ifstream fin("sample/_samples102p");
+   GSieve gs("basis/basis102p", fin);
 
    gs.Start();
 }

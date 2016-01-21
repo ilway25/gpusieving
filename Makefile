@@ -4,11 +4,12 @@ override CPPFLAG += --std=c++11 -g
 LIBS    = -larmadillo
 # LIBS    = -lntl -lgmp -lboost_serialization
 
-NVARCH = -arch=sm_52 -use_fast_math -I../cub-1.5.1  -lineinfo
-# NVARCH  = -arch=sm_52 -use_fast_math -I../cub-1.5.0 -Icpp11-range -lineinfo
+# NVARCH = -arch=sm_52 -use_fast_math -I../cub-1.4.1  -lineinfo
+# NVARCH  = -arch=sm_52 -use_fast_math -I../cub-1.5.1 -Icpp11-range -lineinfo
+NVARCH  = -gencode arch=compute_35,code=sm_35 -gencode arch=compute_52,code=sm_52 -use_fast_math -I../cub-1.5.1 -lineinfo
 
 # SRCS  = main.cu gsieve.cu
-OBJS  = main.o gsieve.o kernels.o
+OBJS  = main.o gsieve.o kernels.o cub_wrapper.o
 
 all: $(OBJS)
 	$(NVCC) -o g $^ $(LIBS) $(CPPFLAG) $(NVARCH)
