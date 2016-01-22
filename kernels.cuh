@@ -1,10 +1,12 @@
 #pragma once
 
+#include <numeric>
+#include <algorithm>
 #include <cub/util_macro.cuh>
 
-const int NGPUS = 3;
+const int NGPUS = 1;
 
-const int N = 102;
+const int N = 82;
 const int RakeWidth = 8;
 
 // const int ILP = 2;
@@ -30,11 +32,23 @@ struct Point
 
    __device__ __host__ float& operator[](size_t idx) { return data[idx]; }
    __device__ __host__ const float& operator[](size_t idx) const { return data[idx]; }
+
+   float norm() const { return std::inner_product(data, data + P, data, 0); }
+   void minimize()
+   {
+      auto p = std::min_element(data, data + P, [](float a, float b) { return a * a < b * b; });
+      std::rotate(data, p, data + P);
+   }
 };
 
 struct NotReduced
 {
    __host__ __device__ bool operator()(Norm n) const { return n > 10; }
+};
+
+struct NotCollision
+{
+   __host__ __device__ bool operator()(Norm n) const { return n > 1; }
 };
 
 template <int step>

@@ -13,7 +13,8 @@ struct List
    ~List();
 
    void Print(int size, string header = {});
-   void CopyFromAsync(const List& that, int size, cudaStream_t);
+   void CopyFromAsync(const List& that, int size, cudaStream_t, int offset1 = 0, int offset2 = 0);
+   void CopyFrom(const List& that, int size, int offset1 = 0, int offset2 = 0);
 
    Point* points;
    Norm* norms;
@@ -41,10 +42,13 @@ private:
    fmat     _B;
 
    List S, hostQ[NGPUS];                // Host
-   List L[NGPUS], Q[NGPUS], Q2[NGPUS];  // Gpu
+   List L[NGPUS], Q[NGPUS], Q2[NGPUS], L2[NGPUS];  // Gpu
 
    int Ssize;
    int Lsize[NGPUS] {};
 
    cudaStream_t streams[NGPUS];
+
+   Norm    best_norm;
+   frowvec shortest_vec;
 };

@@ -45,12 +45,12 @@ void reduce(Point* gs, Norm* gns, size_t g_size, const Point* hs, const Norm* hn
    {
       const int g_idx = g_base + subinst;
 
-
       float g[NT], gg;
       float reduced {}; // Flag: 0 <-> Not reduced.
 
       BlockLoadT(shared.load).Load(g_in + g_base * Pitch, g);
       gg = gns[g_idx];
+      __syncthreads();
 
       float min_norm = gg + P * (g_in + g_base * Pitch)[0] * (g_in + g_base * Pitch)[0];
 
@@ -59,8 +59,11 @@ void reduce(Point* gs, Norm* gns, size_t g_size, const Point* hs, const Norm* hn
 
       for (int h_base = 0; h_base < h_size; h_base += NumPrefetch)
       {
+         __syncthreads();
+
          BlockLoadVT(shared.loadv).Load(h_in + h_base * Pitch, prefetch.block[threadIdx.x]);
-         prefetch_n[threadIdx.x] = hns[h_base + threadIdx.x];
+         if (threadIdx.x < NumPrefetch)
+            prefetch_n[threadIdx.x] = hns[h_base + threadIdx.x];
          __syncthreads();
 
          for (int i = 0; i < NumPrefetch && h_base + i < h_size; ++i)
@@ -70,7 +73,7 @@ void reduce(Point* gs, Norm* gns, size_t g_size, const Point* hs, const Norm* hn
 
             if (hh < 10) continue; // h is already reduced
 
-            // g_buf has no zero padding
+            // h_buf has no zero padding
             using sep = float[RakeWidth][NT];
             __shared__ float h_buf[Pitch * 2];
 
@@ -83,19 +86,17 @@ void reduce(Point* gs, Norm* gns, size_t g_size, const Point* hs, const Norm* hn
             if (threadIdx.x < Pitch * 2 - P * 2)
                h_buf[threadIdx.x + 2 * P] = 0;
 
-            __syncthreads();
 
             for (int rot = 0; rot < P; ++rot)
             {
-               if (step == 1 && g_idx == h_idx && rot == 0)
-                  continue;
+               __syncthreads();
 
                float q_best {};
                float gh {};
 
                float h[NT];
                for (int j = 0; j < NT; ++j)
-                  h[j] = (*(sep*)(&h_buf[rot]))[subidx][j];
+                  h[j] = (*(volatile sep*)(&h_buf[rot]))[subidx][j];
 
                for (int j = 0; j < NT; ++j)
                   gh += g[j] * h[j];
@@ -110,11 +111,14 @@ void reduce(Point* gs, Norm* gns, size_t g_size, const Point* hs, const Norm* hn
                         vv = hh + P * h[j] * h[j];
 
                   float q = rintf(uv / uu);
+
+                  if (step == 1 && gg < 0) q = 0;
+                  if (step == 1 && g_idx == h_idx && rot == 0) q = 0;
+
                   float new_norm = uu - 2 * q * uv + q * q * vv;
 
                   // if (new_norm < min_norm && q != 0 && subidx * NT + j < P)
                   if (new_norm < min_norm && subidx * NT + j < P)
-                  // if (g_idx == 10)
                   {
                      // printf("%d, %d, %d (%d) -> %.0f, %.0f, %.0f -> %.0f (%.0f, %.0f)\n",
                      //    g_idx, h_idx, subidx * NT + j, rot,
@@ -142,16 +146,16 @@ void reduce(Point* gs, Norm* gns, size_t g_size, const Point* hs, const Norm* hn
                gg += q_best * q_best * hh - q_best * 2 * gh;
                reduced += q_best * q_best;
 
+               __syncthreads();
+
                if (threadIdx.x == 0)
                   h_buf[P + rot] = h[0];
-
-               __syncthreads();
             }
          }
       }
 
       BlockStoreT(shared.store).Store(g_ptr + g_base * Pitch, g);
       if (reduced > 0.5) gns[g_idx] = -1;
-      // gns[g_idx] = gg;
+      __syncthreads();
    }
 }
