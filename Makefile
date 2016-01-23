@@ -33,6 +33,9 @@ s: t.cubin
 ptx: kernels.cu
 	$(NVCC) kernels.cu $(CPPFLAG) -arch sm_52 -use_fast_math -I../cub-1.5.1 -lineinfo -ptx -o t.ptx -src-in-ptx
 
+dot: t.cubin
+	nvdisasm -c -fun 6 -cfg t.cubin | dot -o1.pdf -Tpdf
+
 clean:
 	rm -f *.o g
 

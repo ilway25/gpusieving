@@ -6,7 +6,7 @@
 
 const int NGPUS = 1;
 
-const int N = 82;
+const int N = 96;
 const int RakeWidth = 8;
 
 // const int ILP = 2;
@@ -43,7 +43,7 @@ struct Point
 
 struct NotReduced
 {
-   __host__ __device__ bool operator()(Norm n) const { return n > 10; }
+   __host__ __device__ bool operator()(Norm n) const { return n > 1000000; }
 };
 
 struct NotCollision

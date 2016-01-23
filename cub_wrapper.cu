@@ -12,10 +12,10 @@ template
 void SelectIfAsync<Norm*, Norm*, NotReduced>(Norm*, Norm*, int, NotReduced, int);
 
 template
-void SortPairs<unsigned, Point>(unsigned*, unsigned*, Point*, Point*, int, int);
+void SortPairs<Norm, Point>(Norm*, Norm*, Point*, Point*, int, int);
 
 template
-void SortPairsDescending<unsigned, Point>(unsigned*, unsigned*, Point*, Point*, int);
+void SortPairsDescending<Norm, Point>(Norm*, Norm*, Point*, Point*, int);
 
 void*  d_temp = 0;
 size_t temp_size = 0;
