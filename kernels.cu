@@ -6,7 +6,7 @@ template __global__ void reduce<0>(Point*, Norm*, size_t, const Point*, const No
 template __global__ void reduce<1>(Point*, Norm*, size_t, const Point*, const Norm*, size_t);
 template __global__ void reduce<2>(Point*, Norm*, size_t, const Point*, const Norm*, size_t);
 
-__device__ float tmp;
+// __device__ float tmp;
 
 const int NumPrefetch = CUB_QUOTIENT_FLOOR(4 * BlockDim, Pitch);
 
@@ -130,6 +130,9 @@ void reduce(Point* gs, Norm* gns, size_t g_size, const Point* hs, const Norm* hn
 
                   float new_norm = uu + q * (q * vv - 2 * uv);
 
+                  // if (new_norm < min_norm && g_idx == 1648 && q != 0)
+                     // printf(" -- %d %d %f\n", h_idx, rot, q);
+
                   if (new_norm < min_norm) // 若 j 快到 NT，要加 && subidx * NT + j < P)
                   {
                      min_norm = new_norm;
@@ -149,7 +152,7 @@ void reduce(Point* gs, Norm* gns, size_t g_size, const Point* hs, const Norm* hn
                   }
                }
 
-               if (!(step == 1 && gg < 0))
+               if (!(step == 1 && gg < 10))
                {
                   for (int j = 0; j < NT; ++j)
                      g[j] -= q_best * h[j];
@@ -173,3 +176,51 @@ void reduce(Point* gs, Norm* gns, size_t g_size, const Point* hs, const Norm* hn
       if (step == 0 && check) break;
    }
 }
+
+struct DataWithTid
+{
+   __device__ DataWithTid() {}
+   __device__ DataWithTid(float d, int t) : data(d), tid(t) {}
+
+   float data;
+   int tid;
+};
+
+struct DataWithTidMin
+{
+   __device__ DataWithTid operator() (const DataWithTid &a, const DataWithTid &b) const
+   {
+      if (a.data < b.data) return a;
+      if (a.data > b.data) return b;
+      if (a.tid < b.tid) return a;
+      return b;
+   }
+};
+
+__global__
+void minimize(Point* list, size_t size)
+{
+   typedef cub::BlockReduce<DataWithTid, P> BlockReduce;
+   __shared__ typename BlockReduce::TempStorage temp_storage;
+
+   for (int i = blockIdx.x; i < size; i += GridDim)
+   {
+      float r = 1e20;
+      if (threadIdx.x < P) r = list[i][threadIdx.x];
+
+      DataWithTid diff(r * r, threadIdx.x);
+      DataWithTid t = BlockReduce(temp_storage).Reduce(diff, DataWithTidMin());
+
+      __shared__ DataWithTid min;
+      if (threadIdx.x == 0) min = t;
+      __syncthreads();
+
+      int target = threadIdx.x - min.tid;
+      if (target < 0) target += P;
+
+      if (threadIdx.x < P)
+         list[i][target] = r;
+      __syncthreads();
+   }
+}
+

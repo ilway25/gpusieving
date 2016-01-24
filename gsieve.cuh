@@ -36,6 +36,9 @@ public:
 
    void GoldenReduce(Point*, Norm*, size_t, const Point*, const Norm*, size_t);
 
+   void Save(string filename);
+   void Load(string filename);
+
 private:
    void ReadBasis(string filename);
 
@@ -54,4 +57,6 @@ private:
 
    Norm    best_norm;
    frowvec shortest_vec;
+
+   int iterations = 0;
 };

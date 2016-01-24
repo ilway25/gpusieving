@@ -39,6 +39,12 @@ struct Point
       auto p = std::min_element(data, data + P, [](float a, float b) { return a * a < b * b; });
       std::rotate(data, p, data + P);
    }
+
+   template <class Archive>
+   void serialize(Archive & ar, const unsigned int version)
+   {
+      ar & data;
+   }
 };
 
 struct NotReduced
@@ -54,3 +60,5 @@ struct NotCollision
 template <int step>
 __global__
 void reduce(Point* gs, Norm* gns, size_t g_size, const Point* hs, const Norm* hns, size_t h_size);
+
+__global__ void minimize(Point* list, size_t size);
