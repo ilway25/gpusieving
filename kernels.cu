@@ -125,7 +125,7 @@ void reduce(Point* gs, Norm* gns, size_t g_size, const Point* hs, const Norm* hn
 
                   float q = rintf(uv / uu);
 
-                  if (step == 1 && gg < 0) q = 0;
+                  // if (step == 1 && gg < 0) q = 0;
                   if (step == 1 && g_idx == h_idx && rot == 0) q = 0;
 
                   float new_norm = uu + q * (q * vv - 2 * uv);
@@ -149,10 +149,13 @@ void reduce(Point* gs, Norm* gns, size_t g_size, const Point* hs, const Norm* hn
                   }
                }
 
-               for (int j = 0; j < NT; ++j)
-                  g[j] -= q_best * h[j];
-               gg += q_best * (q_best * hh - 2 * gh);
-               reduced += q_best * q_best;
+               if (!(step == 1 && gg < 0))
+               {
+                  for (int j = 0; j < NT; ++j)
+                     g[j] -= q_best * h[j];
+                  gg += q_best * (q_best * hh - 2 * gh);
+                  reduced += q_best * q_best;
+               }
 
                __syncthreads();
 

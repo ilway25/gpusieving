@@ -4,7 +4,7 @@
 #include <algorithm>
 #include <cub/util_macro.cuh>
 
-const int NGPUS = 1;
+const int NGPUS = 3;
 
 const int N = 96;
 const int RakeWidth = 8;

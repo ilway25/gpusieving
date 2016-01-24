@@ -109,6 +109,59 @@ void List::Print(int size, string header)
    }
 }
 
+void List::Check(const fmat& B, int size, string header)
+{
+   auto ps = points;
+   auto ns = norms;
+
+   // TODO: Clean up
+   if (_gpu != -1)
+   {
+      ps = new Point[size];
+      ns = new Norm[size];
+
+      CubDebugExit(cudaSetDevice(_gpu));
+      CubDebugExit(cudaMemcpy(ps, points, size * sizeof(Point), cudaMemcpyDefault));
+      CubDebugExit(cudaMemcpy(ns, norms, size * sizeof(Norm), cudaMemcpyDefault));
+   }
+
+   fmat M(size, N);
+
+   // cout << "1" << endl;
+   for (int i = 0; i < size; ++i)
+      M.row(i) = ToVector(ps[i]);
+
+   // cout << "2" << endl;
+
+   // fmat sol = solve(B.t(), M.t());
+   fmat sol = M * B;
+   // cout << "3" << endl;
+
+   int cnt = 0;
+   for (int i = 0; i < size && cnt < 5; ++i)
+   {
+      bool wrong = false;
+      for (int j = 0; j < N; ++j)
+         wrong = wrong || (abs(sol(i, j) - std::round(sol(i, j))) > 0.1);
+
+      if (wrong)
+      {
+         ++cnt;
+         cout << header << " (" << i << ")\t";
+         M.row(i).head(16).raw_print();
+         cout << "  =>\t";
+         sol.row(i).head(16).raw_print();
+      }
+   }
+   // cout << "4" << endl;
+
+   if (_gpu != -1)
+   {
+      delete[] ps;
+      delete[] ns;
+   }
+}
+
 List::~List()
 {
    if (_gpu != -1)
@@ -186,6 +239,7 @@ void GSieve::ReadBasis(string filename)
    assert(nums.size() == N * N);
 
    _B = reshape(fmat(nums), N, N).t();
+   _Binv = _B.i();
 }
 
 void GSieve::Start()
@@ -203,9 +257,14 @@ void GSieve::Start()
 
    int min_L = 0; // Min list from last iteration
 
-   for (int iterations = 0; iterations < 30000; ++iterations)
+   for (int iterations = 0; iterations < 3000; ++iterations)
    {
       cout << "====== Iteration " << iterations << " ======" << endl;
+
+      // cout << "ListS: ";
+      // for (int i = 0; i < NGPUS; ++i)
+      //    cout << Lsize[i] << ' ';
+      // cout << endl;
 
       CubDebugExit(cudaSetDevice(0));
       GenerateSamples();
@@ -254,7 +313,6 @@ void GSieve::Start()
 
          // L[i].Print(Lsize[i], "L-" + to_string(i));
 
-         // Partition 似乎可以輸入輸出相同
          TransformInputIterator<bool, NotReduced, Norm*> itr1(L[i].norms, NotReduced());
          PartitionAsync(L[i].points, itr1, L2[i].points, Lsize[i], i);
          SelectIfAsync(L[i].norms, L[i].norms, Lsize[i], NotReduced(), i);
@@ -269,6 +327,13 @@ void GSieve::Start()
          CubDebugExit(cudaStreamSynchronize(streams[i]));
       }
 
+      for (int i = 0; i < NGPUS; ++i)
+      {
+         Q[i].Check(_Binv, NumSamples, "Q-" + to_string(i));
+         Q2[i].Check(_Binv, NumSamples, "Q2-" + to_string(i));
+         L[i].Check(_Binv, Lsize[i], "L-" + to_string(i));
+      }
+
       // Put reduced vectors (INCLUDING collisions) onto stack
       for (int i = 0; i < NGPUS; ++i)
       {
@@ -278,7 +343,6 @@ void GSieve::Start()
          // S.CopyFrom(L[i], amount, Ssize, new_Lsize[i]);
          CubDebugExit(cudaMemcpy(L[i].points, L2[i].points, sizeof(Point) * new_Lsize[i], cudaMemcpyDefault));
          CubDebugExit(cudaMemcpy(S.points + Ssize, L2[i].points + new_Lsize[i], sizeof(Point) * amount, cudaMemcpyDefault));
-         CubDebugExit(cudaMemcpy(S.norms + Ssize, L[i].norms + new_Lsize[i], sizeof(Norm) * amount, cudaMemcpyDefault));
 
          // Recalculate norm
          for (int k = 0; k < amount; ++k)
