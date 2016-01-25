@@ -262,12 +262,8 @@ void GSieve::Start()
 
    int min_L = 0; // Min list from last iteration
 
-   // Load("data");
    for (; iterations < 5000; ++iterations)
    {
-      if (iterations == 184)
-         Save("data184");
-
       cout << "====== Iteration " << iterations << " ======" << endl;
 
       // cout << "ListS: ";
@@ -347,12 +343,12 @@ void GSieve::Start()
          CubDebugExit(cudaStreamSynchronize(streams[i]));
       }
 
-      for (int i = 0; i < NGPUS; ++i)
-      {
-         Q[i].Check(_Binv, NumSamples, "Q-" + to_string(i));
-         Q2[i].Check(_Binv, NumSamples, "Q2-" + to_string(i));
-         L[i].Check(_Binv, Lsize[i], "L-" + to_string(i));
-      }
+      // for (int i = 0; i < NGPUS; ++i)
+      // {
+      //    Q[i].Check(_Binv, NumSamples, "Q-" + to_string(i));
+      //    Q2[i].Check(_Binv, NumSamples, "Q2-" + to_string(i));
+      //    L[i].Check(_Binv, Lsize[i], "L-" + to_string(i));
+      // }
 
       // Put reduced vectors (INCLUDING collisions) onto stack
       for (int i = 0; i < NGPUS; ++i)
@@ -382,6 +378,7 @@ void GSieve::Start()
          auto mid = partition(S.points, S.points + Ssize, [] (Point n) { return NotReduced()(n.norm()); } );
          Ssize = mid - S.points;
 
+         // 下一行有時會錯？
          CubDebugExit(cudaMemcpy(points, S.points, sizeof(Point) * Ssize, cudaMemcpyDefault));
 
          for (int i = 0; i < Ssize; ++i)

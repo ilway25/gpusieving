@@ -4,10 +4,10 @@
 #include <algorithm>
 #include <cub/util_macro.cuh>
 
-const int NGPUS = 3;
+const int NGPUS = 1;
 
 const int N = 96;
-const int RakeWidth = 8;
+const int RakeWidth = 4;
 
 // const int ILP = 2;
 const int GridDim  = 256;
