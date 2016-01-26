@@ -253,8 +253,8 @@ void GSieve::Start()
 
    Point* points;
    Norm*  norms;
-   CubDebugExit(cudaMallocHost(&points, sizeof(Point) * NumSamples));
-   CubDebugExit(cudaMallocHost(&norms, sizeof(Norm) * NumSamples));
+   CubDebugExit(cudaMallocHost(&points, sizeof(Point) * 100000));
+   CubDebugExit(cudaMallocHost(&norms, sizeof(Norm) * 100000)); // FIXME !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
    int *new_Lsize;
    CubDebugExit(cudaMallocHost(&new_Lsize, sizeof(int) * NGPUS));
