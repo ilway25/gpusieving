@@ -3,8 +3,8 @@ CC      = clang++-3.6
 override CPPFLAG += --std=c++11
 LIBS    = -larmadillo -lboost_serialization
 
-# NVARCH = -arch=sm_52 -use_fast_math -I../cub-1.5.1 -lineinfo
-NVARCH = -gencode arch=compute_35,code=sm_35 -gencode arch=compute_52,code=sm_52 -use_fast_math -I../cub-1.5.1 -lineinfo
+NVARCH = -arch=sm_52 -use_fast_math -I../cub-1.5.1 -lineinfo
+# NVARCH = -gencode arch=compute_35,code=sm_35 -gencode arch=compute_52,code=sm_52 -use_fast_math -I../cub-1.5.1 -lineinfo
 
 OBJS  = main.o gsieve.o kernels.o cub_wrapper.o
 
@@ -20,7 +20,7 @@ all: $(OBJS)
 %.o: %.cu
 	$(NVCC) -c $^ $(CPPFLAG) $(NVARCH)
 
-t.cubin: kernels.cu
+t.cubin: kernels.cu kernels.cuh
 	$(NVCC) kernels.cu $(CPPFLAG) -arch sm_52 -use_fast_math -I../cub-1.5.1 -lineinfo  -cubin -o t.cubin -Xptxas=-v
 
 s: t.cubin

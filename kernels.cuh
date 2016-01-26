@@ -9,7 +9,11 @@ const int NGPUS = 1;
 const int N = 96;
 const int RakeWidth = 4;
 
+const int Times = 4;
+
+const int ILP = 8;
 // const int ILP = 2;
+
 const int GridDim  = 256;
 const int BlockDim = 256;
 

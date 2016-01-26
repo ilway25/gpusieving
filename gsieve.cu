@@ -327,8 +327,6 @@ void GSieve::Start()
 
          reduce<2><<<GridDim, BlockDim, 0, streams[i]>>>(L[i].points, L[i].norms, Lsize[i], Q2[i].points, Q2[i].norms, NumSamples);
 
-         // L[i].Print(Lsize[i], "L-" + to_string(i));
-
          TransformInputIterator<bool, NotReduced, Norm*> itr1(L[i].norms, NotReduced());
          PartitionAsync(L[i].points, itr1, L2[i].points, Lsize[i], i);
          SelectIfAsync(L[i].norms, L[i].norms, Lsize[i], NotReduced(), i);

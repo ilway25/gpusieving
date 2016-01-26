@@ -2,11 +2,25 @@
 
 #include "kernels.cuh"
 
+// Unroller
+template <int N>
+struct sequence {
+    template <typename Lambda>
+    static __forceinline__ __device__ void run(const Lambda& f) {
+        sequence<N-1>::run(f);
+        f(N-1);
+    }
+};
+
+template <>
+struct sequence<0> {
+    template <typename Lambda>
+    static __forceinline__ __device__ void run(const Lambda& f) {}
+};
+
 template __global__ void reduce<0>(Point*, Norm*, size_t, const Point*, const Norm*, size_t);
 template __global__ void reduce<1>(Point*, Norm*, size_t, const Point*, const Norm*, size_t);
 template __global__ void reduce<2>(Point*, Norm*, size_t, const Point*, const Norm*, size_t);
-
-// __device__ float tmp;
 
 const int NumPrefetch = CUB_QUOTIENT_FLOOR(4 * BlockDim, Pitch);
 
@@ -100,104 +114,63 @@ void reduce(Point* gs, Norm* gns, size_t g_size, const Point* hs, const Norm* hn
                h_buf[threadIdx.x + 2 * P] = 0;
 
 
-            for (int rot = 0; rot < CUB_ROUND_DOWN_NEAREST(P, 4) - 4; rot += 4)
+            for (int rot = 0; rot < CUB_ROUND_DOWN_NEAREST(P, ILP) - ILP; rot += ILP)
             {
                __syncthreads();
 
                float q_best {};
-               float gh {}, gh2 {}, gh3 {}, gh4 {};
+               float gh[ILP] {};
 
-               float h[NT + 3];
+               float h[NT + (ILP - 1)];
                for (int j = 0; j < NT; ++j)
                   h[j] = (*(volatile sep*)(&h_buf[rot]))[subidx][j];
-               h[NT] = h_buf[rot + (subidx + 1) * NT];
-               h[NT + 1] = h_buf[rot + (subidx + 1) * NT + 1];
-               h[NT + 2] = h_buf[rot + (subidx + 1) * NT + 2]; // 小心出界
-               if (subidx == RakeWidth - 1) h[NT] = h[NT + 1] = h[NT + 2] = 0;
 
-               for (int j = 0; j < NT; ++j)
+               sequence<ILP - 1>::run([&](int k)
                {
-                  gh += g[j] * h[j];
-                  gh2 += g[j] * h[j+1];
-                  gh3 += g[j] * h[j+2];
-                  gh4 += g[j] * h[j+3];
-               }
+                  h[NT + k] = h_buf[rot + (subidx + 1) * NT + k]; // 小心出界
+                  if (subidx == RakeWidth - 1) h[NT + k] = 0;
+               });
+
+               sequence<ILP>::run([&](int k)
+               {
+                  for (int j = 0; j < NT; ++j)
+                     gh[k] += g[j] * h[j + k];
+               });
+
                if (subidx == RakeWidth - 1)
-               {
-                  gh2 += g[NT - Padding - 1] * h_buf[rot];
-
-                  gh3 += g[NT - Padding - 2] * h_buf[rot];
-                  gh3 += g[NT - Padding - 1] * h_buf[rot + 1];
-
-                  gh4 += g[NT - Padding - 3] * h_buf[rot];
-                  gh4 += g[NT - Padding - 2] * h_buf[rot + 1];
-                  gh4 += g[NT - Padding - 1] * h_buf[rot + 2];
-               }
+                  sequence<ILP>::run([&](int k)
+                  {
+                     for (int p = 0 ; p < k; ++p)
+                        gh[k] += g[NT - Padding - (k - p)] * h_buf[rot + p];
+                  });
 
                for (int j = 1; j < RakeWidth; j *= 2)
-               {
-                  gh += __shfl_xor(gh, j);
-                  gh2 += __shfl_xor(gh2, j);
-                  gh3 += __shfl_xor(gh3, j);
-                  gh4 += __shfl_xor(gh4, j);
-               }
-
-               // if (threadIdx.x == 0 && blockIdx.x == 0)
-               //    tmp = gh+gh2;
+                  for (int k = 0; k < ILP; ++k)
+                     gh[k] += __shfl_xor(gh[k], j);
 
                int from = 0;
-               for (int j = 0; j < 2; ++j) // j 可以 1 至 NT
+               for (int j = 0; j < Times; ++j) // j 可以 1 至 NT
                {
-                  float uu = gg + (P * g[j]) * g[j],
-                        uv = gh + (P * g[j]) * h[j],
-                        vv = hh + P * h[j] * h[j];
-                  float uv2 = gh2 + (P * g[j]) * h[j + 1],
-                        vv2 = hh + P * h[j + 1] * h[j + 1];
-                  float uv3 = gh3 + (P * g[j]) * h[j + 2],
-                        vv3 = hh + P * h[j + 2] * h[j + 2];
-                  float uv4 = gh4 + (P * g[j]) * h[j + 3],
-                        vv4 = hh + P * h[j + 3] * h[j + 3];
+                  float uu = gg + (P * g[j]) * g[j];
 
-                  float q = rintf(uv / uu);
-                  float q2 = rintf(uv2 / uu);
-                  float q3 = rintf(uv3 / uu);
-                  float q4 = rintf(uv4 / uu);
-
-                  if (step == 1 && gg < 0) q = q2 = q3 = q4 = 0;
-                  if (step == 1 && g_idx == h_idx && rot == 0) q = 0;
-
-                  float new_norm = uu + q * (q * vv - 2 * uv);
-                  float new_norm2 = uu + q2 * (q2 * vv2 - 2 * uv2);
-                  float new_norm3 = uu + q3 * (q3 * vv3 - 2 * uv3);
-                  float new_norm4 = uu + q4 * (q4 * vv4 - 2 * uv4);
-
-                  if (new_norm < min_norm) // 若 j 快到 NT，要加 && subidx * NT + j < P)
+                  sequence<ILP>::run([&](int k)
                   {
-                     min_norm = new_norm;
-                     q_best = q;
-                     from = 0;
-                  }
+                     float uv = gh[k] + (P * g[j]) * h[j + k],
+                           vv = hh + P * h[j + k] * h[j + k];
 
-                  if (new_norm2 < min_norm) // 若 j 快到 NT，要加 && subidx * NT + j < P)
-                  {
-                     min_norm = new_norm2;
-                     q_best = q2;
-                     from = 1;
-                  }
+                     float q = rintf(uv / uu);
 
-                  if (new_norm3 < min_norm) // 若 j 快到 NT，要加 && subidx * NT + j < P)
-                  {
-                     min_norm = new_norm3;
-                     q_best = q3;
-                     from = 2;
-                  }
+                     if (step == 1 && gg < 0) q = 0;
+                     if (step == 1 && g_idx == h_idx && rot == 0 && k == 0) q = 0;
 
-                  if (new_norm4 < min_norm) // 若 j 快到 NT，要加 && subidx * NT + j < P)
-                  {
-                     min_norm = new_norm4;
-                     q_best = q4;
-                     from = 3;
-                  }
+                     float new_norm = uu + q * (q * vv - 2 * uv);
+                     if (new_norm < min_norm) // 若 j 快到 NT，要加 && subidx * NT + j < P)
+                     {
+                        min_norm = new_norm;
+                        q_best = q;
+                        from = k;
+                     }
+                  });
                }
 
                for (int j = 1; j < RakeWidth; j *= 2)
@@ -216,54 +189,33 @@ void reduce(Point* gs, Norm* gns, size_t g_size, const Point* hs, const Norm* hn
 
                if (step == 0 || __any(q_best != 0)) // 這行舊版沒有
                {
-                  // if (!(step == 1 && gg < 10))
+                  sequence<ILP - 1>::run([&](int k)
                   {
-
                      if (subidx == RakeWidth - 1)
+                        if (from >= k + 1)
+                           h[NT - Padding + k] = h_buf[rot + k];
+                  });
+
+                  sequence<ILP>::run([&](int k)
+                  {
+                     if (from == k)
                      {
-                        if (from >= 1)
-                           h[NT - Padding] = h_buf[rot];
-                        if (from >= 2)
-                           h[NT - Padding + 1] = h_buf[rot + 1];
-                        if (from >= 3)
-                           h[NT - Padding + 2] = h_buf[rot + 2];
+                        gg += q_best * (q_best * hh - 2 * gh[k]);
+                        for (int j = 0; j < NT; ++j)
+                           g[j] -= q_best * h[j + k];
                      }
+                  });
 
-                     if (from == 0)
-                        for (int j = 0; j < NT; ++j)
-                           g[j] -= q_best * h[j];
-                     else if (from == 1)
-                        for (int j = 0; j < NT; ++j)
-                           g[j] -= q_best * h[j + 1];
-                     else if (from == 2)
-                        for (int j = 0; j < NT; ++j)
-                           g[j] -= q_best * h[j + 2];
-                     else if (from == 3)
-                        for (int j = 0; j < NT; ++j)
-                           g[j] -= q_best * h[j + 3];
-
-                     if (from == 0)
-                        gg += q_best * (q_best * hh - 2 * gh);
-                     else if (from == 1)
-                        gg += q_best * (q_best * hh - 2 * gh2);
-                     else if (from == 2)
-                        gg += q_best * (q_best * hh - 2 * gh3);
-                     else if (from == 3)
-                        gg += q_best * (q_best * hh - 2 * gh4);
-
-                     reduced += q_best * q_best;
-                  }
+                  reduced += q_best * q_best;
                }
 
                __syncthreads();
 
                if (threadIdx.x == 0)
-               {
-                  h_buf[P + rot] = h[0];
-                  h_buf[P + rot + 1] = h[1];
-                  h_buf[P + rot + 2] = h[2];
-                  h_buf[P + rot + 3] = h[3];
-               }
+                  sequence<ILP>::run([&](int k)
+                  {
+                     h_buf[P + rot + k] = h[k];
+                  });
             }
          }
          __syncthreads();
