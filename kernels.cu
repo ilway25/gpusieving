@@ -104,24 +104,13 @@ void reduce(Point* gs, Norm* gns, size_t g_size, const Point* hs, const Norm* hn
             const int h_idx = h_base + i;
             const float hh = prefetch_n[i];
 
-            if (hh < 10) continue; // h is already reduced
+            if (step != 0 && hh < 10) continue; // h is already reduced
 
             // h_buf has no zero padding
             using sep = float[RakeWidth][NT];
             __shared__ float h_buf[BlockDim]; // 可能不夠 126 維？
 
-            // for (int j = threadIdx.x; j < BlockDim; ++j)
-               h_buf[threadIdx.x] = threadIdx.x < P ? prefetch.linear[i][threadIdx.x] : 0;
-            /*
-            if (threadIdx.x < P)
-            {
-               h_buf[threadIdx.x] = prefetch.linear[i][threadIdx.x];
-               h_buf[threadIdx.x + P] = 0;
-            }
-            if (threadIdx.x < Pitch * 2 - P * 2) ///........
-               h_buf[threadIdx.x + 2 * P] = 0;
-            */
-
+            h_buf[threadIdx.x] = threadIdx.x < P ? prefetch.linear[i][threadIdx.x] : 0;
 
             for (int rot = 0; rot < CUB_ROUND_DOWN_NEAREST(P, ILP) - ILP; rot += ILP)
             {
