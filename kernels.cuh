@@ -7,12 +7,12 @@
 const int NGPUS = 1;
 
 const int N = 96;
-const int RakeWidth = 4;
+const int RakeWidth = 8;
 
 const int Times = 4;
 
-const int ILP = 8;
-// const int ILP = 2;
+const int ILP = 5;    // 96 維，不能設 8 ，因為 P = 97, Pitch = 104, 104-97=7 => 最後只有 7 個給你用
+const int InstLP = 1; // 改的話會影響 sort 過的 reduce
 
 const int GridDim  = 256;
 const int BlockDim = 256;

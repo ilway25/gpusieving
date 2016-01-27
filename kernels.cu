@@ -61,17 +61,22 @@ void reduce(Point* gs, Norm* gns, size_t g_size, const Point* hs, const Norm* hn
    } shared;
 
 
-   for (int g_base = blockIdx.x * InstPerBlock; g_base < g_size; g_base += GridDim * InstPerBlock)
+   for (int g_base = blockIdx.x * InstPerBlock * InstLP; g_base < g_size; g_base += GridDim * InstPerBlock * InstLP)
    {
-      const int g_idx = g_base + subinst;
+      const auto g_idx = [&](int e) { return g_base + e * InstPerBlock + subinst; };
 
-      float g[NT], gg;
-      float reduced {}; // Flag: 0 <-> Not reduced.
+      float g[InstLP][NT], gg[InstLP];
+      float reduced[InstLP] {}; // Flag: 0 <-> Not reduced.
 
-      BlockLoadT(shared.load).Load(g_in + g_base * Pitch, g);
-      gg = gns[g_idx];
+      float min_norm[InstLP];
 
-      float min_norm = gg + P * (g_in + g_base * Pitch)[0] * (g_in + g_base * Pitch)[0];
+      sequence<InstLP>::run([&](int e)
+      {
+         BlockLoadT(shared.load).Load(g_in + (g_base + e * InstPerBlock) * Pitch, g[e]);
+         gg[e] = gns[g_idx(e)];
+         auto t = (g_in + (g_base + e * InstPerBlock) * Pitch)[0];
+         min_norm[e] = gg[e] + P * t * t;
+      });
 
       __shared__ alignas(128) shared_t prefetch;
       __shared__ float prefetch_n[BlockDim];
@@ -85,14 +90,14 @@ void reduce(Point* gs, Norm* gns, size_t g_size, const Point* hs, const Norm* hn
 
          if (step == 0)
          {
-            if (__all(gg < prefetch_n[0]) && threadIdx.x == 0)
+            if (__all(gg[0] < prefetch_n[0]) && threadIdx.x == 0)
                check = true;
             __syncthreads();
 
             if (check) break;
          }
 
-         for (int i = 0; i < NumPrefetch && h_base + i < h_size; ++i)
+         for (int i = 0; i < NumPrefetch && h_base + i < h_size; ++i) // 可省？
          {
             __syncthreads();
 
@@ -103,23 +108,27 @@ void reduce(Point* gs, Norm* gns, size_t g_size, const Point* hs, const Norm* hn
 
             // h_buf has no zero padding
             using sep = float[RakeWidth][NT];
-            __shared__ float h_buf[BlockDim];
+            __shared__ float h_buf[BlockDim]; // 可能不夠 126 維？
 
+            // for (int j = threadIdx.x; j < BlockDim; ++j)
+               h_buf[threadIdx.x] = threadIdx.x < P ? prefetch.linear[i][threadIdx.x] : 0;
+            /*
             if (threadIdx.x < P)
             {
                h_buf[threadIdx.x] = prefetch.linear[i][threadIdx.x];
                h_buf[threadIdx.x + P] = 0;
             }
-            if (threadIdx.x < Pitch * 2 - P * 2)
+            if (threadIdx.x < Pitch * 2 - P * 2) ///........
                h_buf[threadIdx.x + 2 * P] = 0;
+            */
 
 
             for (int rot = 0; rot < CUB_ROUND_DOWN_NEAREST(P, ILP) - ILP; rot += ILP)
             {
                __syncthreads();
 
-               float q_best {};
-               float gh[ILP] {};
+               float q_best[InstLP] {};
+               float gh[InstLP][ILP] {};
 
                float h[NT + (ILP - 1)];
                for (int j = 0; j < NT; ++j)
@@ -128,85 +137,119 @@ void reduce(Point* gs, Norm* gns, size_t g_size, const Point* hs, const Norm* hn
                sequence<ILP - 1>::run([&](int k)
                {
                   h[NT + k] = h_buf[rot + (subidx + 1) * NT + k]; // 小心出界
-                  if (subidx == RakeWidth - 1) h[NT + k] = 0;
+                  // if (subidx == RakeWidth - 1) h[NT + k] = 0;
                });
+
+               // sequence<InstLP>::run([&](int e) // 以下兩個簡化成下面那個
+               // {
+               //    sequence<ILP>::run([&](int k)
+               //    {
+               //       for (int j = 0; j < NT; ++j)
+               //          gh[e][k] += g[e][j] * h[j + k];
+               //    });
+               // });
+
+               // if (subidx == RakeWidth - 1)
+               //    sequence<InstLP>::run([&](int e)
+               //    {
+               //       sequence<ILP>::run([&](int k)
+               //       {
+               //          for (int p = 0 ; p < k; ++p)
+               //             gh[e][k] += g[e][NT - Padding - (k - p)] * h_buf[rot + p];
+               //       });
+               //    });
 
                sequence<ILP>::run([&](int k)
                {
-                  for (int j = 0; j < NT; ++j)
-                     gh[k] += g[j] * h[j + k];
+                  sequence<InstLP>::run([&](int e)
+                  {
+                     for (int j = 0; j < NT; ++j)
+                        gh[e][k] += g[e][j] * h[j + k];
+                  });
+
+                  if (subidx == RakeWidth - 1)
+                     h[NT - Padding + k] = h_buf[rot + k];
                });
 
-               if (subidx == RakeWidth - 1)
-                  sequence<ILP>::run([&](int k)
+               for (int j = 1; j < RakeWidth; j *= 2)
+                  sequence<InstLP>::run([&](int e)
                   {
-                     for (int p = 0 ; p < k; ++p)
-                        gh[k] += g[NT - Padding - (k - p)] * h_buf[rot + p];
+                     sequence<ILP>::run([&](int k)
+                     {
+                        gh[e][k] += __shfl_xor(gh[e][k], j);
+                     });
                   });
 
-               for (int j = 1; j < RakeWidth; j *= 2)
-                  for (int k = 0; k < ILP; ++k)
-                     gh[k] += __shfl_xor(gh[k], j);
-
-               int from = 0;
+               int from[InstLP] {};
                for (int j = 0; j < Times; ++j) // j 可以 1 至 NT
                {
-                  float uu = gg + (P * g[j]) * g[j];
-
-                  sequence<ILP>::run([&](int k)
+                  sequence<InstLP>::run([&](int e)
                   {
-                     float uv = gh[k] + (P * g[j]) * h[j + k],
-                           vv = hh + P * h[j + k] * h[j + k];
+                     float uu = gg[e] + (P * g[e][j]) * g[e][j];
 
-                     float q = rintf(uv / uu);
-
-                     if (step == 1 && gg < 0) q = 0;
-                     if (step == 1 && g_idx == h_idx && rot == 0 && k == 0) q = 0;
-
-                     float new_norm = uu + q * (q * vv - 2 * uv);
-                     if (new_norm < min_norm) // 若 j 快到 NT，要加 && subidx * NT + j < P)
+                     sequence<ILP>::run([&](int k)
                      {
-                        min_norm = new_norm;
-                        q_best = q;
-                        from = k;
-                     }
+                        float uv = gh[e][k] + (P * g[e][j]) * h[j + k],
+                              vv = hh + P * h[j + k] * h[j + k];
+
+                        float q = rintf(uv / uu);
+
+                        if (step == 1 && gg[e] < 0) q = 0;
+                        if (step == 1 && g_idx(e) == h_idx && rot == 0 && k == 0) q = 0;
+
+                        float new_norm = uu + q * (q * vv - 2 * uv);
+                        if (new_norm < min_norm[e]) // 若 j 快到 NT，要加 && subidx * NT + j < P)
+                        {
+                           min_norm[e] = new_norm;
+                           q_best[e] = q;
+                           from[e] = k;
+                        }
+                     });
                   });
                }
 
-               for (int j = 1; j < RakeWidth; j *= 2)
+               float qq {};
+               sequence<InstLP>::run([&](int e)
                {
-                  float min_norm_t = __shfl_xor(min_norm, j);
-                  float q_best_t = __shfl_xor(q_best, j);
-                  float from_t = __shfl_xor(from, j);
-
-                  if (min_norm_t < min_norm || min_norm_t == min_norm && (subidx ^ j) >= subidx)
+                  for (int j = 1; j < RakeWidth; j *= 2)
                   {
-                     min_norm = min_norm_t;
-                     q_best = q_best_t;
-                     from = from_t;
+                     float min_norm_t = __shfl_xor(min_norm[e], j);
+                     float q_best_t = __shfl_xor(q_best[e], j);
+                     float from_t = __shfl_xor(from[e], j);
+
+                     if (min_norm_t < min_norm[e] || min_norm_t == min_norm[e] && (subidx ^ j) >= subidx)
+                     {
+                        min_norm[e] = min_norm_t;
+                        q_best[e] = q_best_t;
+                        from[e] = from_t;
+                     }
                   }
-               }
+                  qq += q_best[e] * q_best[e];
+               });
 
-               if (step == 0 || __any(q_best != 0)) // 這行舊版沒有
+               if (step == 0 || __any(qq != 0)) // 這行舊版沒有
                {
-                  sequence<ILP - 1>::run([&](int k)
-                  {
-                     if (subidx == RakeWidth - 1)
-                        if (from >= k + 1)
-                           h[NT - Padding + k] = h_buf[rot + k];
-                  });
-
                   sequence<ILP>::run([&](int k)
                   {
-                     if (from == k)
+                     k = ILP - 1 - k; // 反過來
+                     sequence<InstLP>::run([&](int e)
                      {
-                        gg += q_best * (q_best * hh - 2 * gh[k]);
-                        for (int j = 0; j < NT; ++j)
-                           g[j] -= q_best * h[j + k];
-                     }
+                        if (from[e] == k)
+                        {
+                           gg[e] += q_best[e] * (q_best[e] * hh - 2 * gh[e][k]);
+                           for (int j = 0; j < NT; ++j)
+                              g[e][j] -= q_best[e] * h[j + k];
+                        }
+                     });
+
+                     if (subidx == RakeWidth - 1)
+                        h[NT - Padding + k] = 0;//h_buf[rot + k];
                   });
 
-                  reduced += q_best * q_best;
+                  sequence<InstLP>::run([&](int e)
+                  {
+                     reduced[e] += q_best[e] * q_best[e];
+                  });
                }
 
                __syncthreads();
@@ -221,14 +264,20 @@ void reduce(Point* gs, Norm* gns, size_t g_size, const Point* hs, const Norm* hn
          __syncthreads();
       }
 
-      BlockStoreT(shared.store).Store(g_ptr + g_base * Pitch, g);
-      if (reduced > 0.5) gns[g_idx] = -1;
+
+      sequence<InstLP>::run([&](int e)
+      {
+         BlockStoreT(shared.store).Store(g_ptr + (g_base + e * InstPerBlock) * Pitch, g[e]);
+         if (reduced[e] > 0.5) gns[g_idx(e)] = -1;
+      });
+
       __syncthreads();
 
       if (step == 0 && check) break;
    }
 }
 
+#if 0
 struct DataWithTid
 {
    __device__ DataWithTid() {}
@@ -276,7 +325,6 @@ void minimize(Point* list, size_t size)
    }
 }
 
-#if 0
 __global__
 void reduce(Point* gs, Norm* gns, size_t g_size, const Point* hs, const Norm* hns, size_t h_size)
 {
