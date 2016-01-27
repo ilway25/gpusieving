@@ -10,12 +10,21 @@ struct sequence {
         sequence<N-1>::run(f);
         f(N-1);
     }
+
+    template <typename Lambda>
+    static __forceinline__ __device__ void reverse(const Lambda& f) {
+        f(N-1);
+        sequence<N-1>::reverse(f);
+    }
 };
+
 
 template <>
 struct sequence<0> {
     template <typename Lambda>
     static __forceinline__ __device__ void run(const Lambda& f) {}
+    template <typename Lambda>
+    static __forceinline__ __device__ void reverse(const Lambda& f) {}
 };
 
 template __global__ void reduce<0>(Point*, Norm*, size_t, const Point*, const Norm*, size_t);
@@ -189,10 +198,10 @@ void reduce(Point* gs, Norm* gns, size_t g_size, const Point* hs, const Norm* hn
                         float new_norm = uu + q * (q * vv - 2 * uv);
                         if (new_norm < min_norm[e]) // 若 j 快到 NT，要加 && subidx * NT + j < P)
                         {
-                           min_norm[e] = new_norm;
                            q_best[e] = q;
-                           from[e] = k;
+                           from[e] = k + 1; // 因為 k 的預設值是 0，後會面多做事
                         }
+                        min_norm[e] = min(new_norm, min_norm[e]);
                      });
                   });
                }
@@ -204,26 +213,26 @@ void reduce(Point* gs, Norm* gns, size_t g_size, const Point* hs, const Norm* hn
                   {
                      float min_norm_t = __shfl_xor(min_norm[e], j);
                      float q_best_t = __shfl_xor(q_best[e], j);
-                     float from_t = __shfl_xor(from[e], j);
+                     int   from_t = __shfl_xor(from[e], j);
 
-                     if (min_norm_t < min_norm[e] || min_norm_t == min_norm[e] && (subidx ^ j) >= subidx)
+                     // 很擔心會出錯..
+                     if (min_norm_t < min_norm[e])// || min_norm_t == min_norm[e] && (subidx ^ j) >= subidx)
                      {
-                        min_norm[e] = min_norm_t;
                         q_best[e] = q_best_t;
                         from[e] = from_t;
                      }
+                     min_norm[e] = min(min_norm_t, min_norm[e]);
                   }
                   qq += q_best[e] * q_best[e];
                });
 
                if (step == 0 || __any(qq != 0)) // 這行舊版沒有
                {
-                  sequence<ILP>::run([&](int k)
+                  sequence<ILP>::reverse([&](int k)
                   {
-                     k = ILP - 1 - k; // 反過來
                      sequence<InstLP>::run([&](int e)
                      {
-                        if (from[e] == k)
+                        if (from[e] == k + 1)
                         {
                            gg[e] += q_best[e] * (q_best[e] * hh - 2 * gh[e][k]);
                            for (int j = 0; j < NT; ++j)
