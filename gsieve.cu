@@ -13,6 +13,9 @@
 
 #include <boost/archive/binary_oarchive.hpp>
 #include <boost/archive/binary_iarchive.hpp>
+#include <boost/serialization/binary_object.hpp>
+
+namespace bs = boost::serialization;
 
 pair<Point, Norm> FromVector(const frowvec& v)
 {
@@ -249,6 +252,8 @@ void GSieve::ReadBasis(string filename)
 
 void GSieve::Start()
 {
+   found_time = start_time = sc::system_clock::now();
+
    CubDebugExit(cudaSetDevice(0));
 
    Point* points;
@@ -455,6 +460,18 @@ void GSieve::Start()
       // for (int i = 0; i < NGPUS; ++i)
       //    L[i].Print(Lsize[i], "L" + to_string(i));
       // S.Print(Ssize, "S");
+      auto tt = sc::system_clock::to_time_t(found_time);
+      cout << "Found: " << ctime(&tt);
+      tt = sc::system_clock::to_time_t(sc::system_clock::now());
+      cout << "Now:   " << ctime(&tt);
+
+      auto now = sc::system_clock::now();
+      duration += sc::duration_cast<sc::milliseconds>(now - start_time);
+      start_time = now;
+
+      cout << "Total: ";
+      print_duration(cout, duration);
+      cout << endl;
 
       if (N == 96 && best_norm < 6327000) break;
    }
@@ -513,14 +530,15 @@ void GSieve::Save(string filename)
    boost::archive::binary_oarchive oa(fout);
 
    oa & iterations & best_norm;
+   oa & bs::make_binary_object(&duration, sizeof(duration));
 
    {
       CubDebugExit(cudaMemcpy(p, S.points, sizeof(Point) * Ssize, cudaMemcpyDefault));
       CubDebugExit(cudaMemcpy(n, S.norms, sizeof(Norm) * Ssize, cudaMemcpyDefault));
 
       oa & Ssize;
-      oa & boost::serialization::make_array(p, Ssize);
-      oa & boost::serialization::make_array(n, Ssize);
+      oa & bs::make_array(p, Ssize);
+      oa & bs::make_array(n, Ssize);
    }
 
    for (int i = 0; i < NGPUS; ++i)
@@ -530,8 +548,8 @@ void GSieve::Save(string filename)
       CubDebugExit(cudaMemcpy(n, L[i].norms, sizeof(Norm) * Lsize[i], cudaMemcpyDefault));
 
       oa & Lsize[i];
-      oa & boost::serialization::make_array(p, Lsize[i]);
-      oa & boost::serialization::make_array(n, Lsize[i]);
+      oa & bs::make_array(p, Lsize[i]);
+      oa & bs::make_array(n, Lsize[i]);
    }
 
    cout << "Data saved to " << filename << endl;
@@ -546,6 +564,7 @@ void GSieve::Load(string filename)
    boost::archive::binary_iarchive ia(fin);
 
    ia & iterations & best_norm;
+   ia & bs::make_binary_object(&duration, sizeof(duration));
 
    {
       ia & Ssize;
@@ -553,8 +572,8 @@ void GSieve::Load(string filename)
       auto p = new Point[Ssize];
       auto n = new Norm[Ssize];
 
-      ia & boost::serialization::make_array(p, Ssize);
-      ia & boost::serialization::make_array(n, Ssize);
+      ia & bs::make_array(p, Ssize);
+      ia & bs::make_array(n, Ssize);
 
       CubDebugExit(cudaMemcpy(S.points, p, sizeof(Point) * Ssize, cudaMemcpyDefault));
       CubDebugExit(cudaMemcpy(S.norms, n, sizeof(Norm) * Ssize, cudaMemcpyDefault));
@@ -572,8 +591,8 @@ void GSieve::Load(string filename)
 
       CubDebugExit(cudaSetDevice(i));
 
-      ia & boost::serialization::make_array(p, Lsize[i]);
-      ia & boost::serialization::make_array(n, Lsize[i]);
+      ia & bs::make_array(p, Lsize[i]);
+      ia & bs::make_array(n, Lsize[i]);
 
       CubDebugExit(cudaMemcpy(L[i].points, p, sizeof(Point) * Lsize[i], cudaMemcpyDefault));
       CubDebugExit(cudaMemcpy(L[i].norms, n, sizeof(Norm) * Lsize[i], cudaMemcpyDefault));

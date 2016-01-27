@@ -4,6 +4,8 @@
 using namespace std;
 using namespace arma;
 
+namespace sc = std::chrono;
+
 #include "kernels.cuh"
 
 struct List
@@ -58,5 +60,38 @@ private:
    Norm    best_norm;
    frowvec shortest_vec;
 
-   int iterations = 0;
+   int iterations {0};
+   sc::system_clock::time_point found_time, start_time;
+   sc::milliseconds             duration {0};
 };
+
+template<typename T>
+void print_duration(std::ostream& out, T dur)
+{
+    auto diff = sc::duration_cast<sc::seconds>(dur).count();
+    auto const secs = diff % 60;
+    diff /= 60;
+    auto const mins = diff % 60;
+    diff /= 60;
+    auto const hours = diff % 24;
+    diff /= 24;
+    auto const days = diff;
+
+    bool printed_earlier = false;
+    if (days >= 1) {
+        printed_earlier = true;
+        out << days << (1 != days ? " days" : " day") << ' ';
+    }
+    if (printed_earlier || hours >= 1) {
+        printed_earlier = true;
+        out << hours << (1 != hours ? " hours" : " hour") << ' ';
+    }
+    if (printed_earlier || mins >= 1) {
+        printed_earlier = true;
+        out << mins << (1 != mins ? " minutes" : " minute") << ' ';
+    }
+    if (printed_earlier || secs >= 1) {
+        printed_earlier = true;
+        out << secs << (1 != secs ? " seconds" : " second") << ' ';
+    }
+}
