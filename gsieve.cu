@@ -267,8 +267,15 @@ void GSieve::Start()
 
    int min_L = 0; // Min list from last iteration
 
-   for (; iterations < 5000; ++iterations)
+   // Load("d50");
+   for (; iterations < 50000; ++iterations)
    {
+      // if (iterations == 50)
+      // {
+      //    Save("d50");
+      //    break;
+      // }
+
       cout << "====== Iteration " << iterations << " ======" << endl;
 
       // cout << "ListS: ";
@@ -474,6 +481,8 @@ void GSieve::Start()
       cout << endl;
 
       if (N == 96 && best_norm < 6327000) break;
+      if (N == 102 && best_norm < 6893000) break;
+      if (N == 112 && best_norm < 7636000) break;
    }
 }
 

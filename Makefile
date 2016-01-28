@@ -15,10 +15,10 @@ all: $(OBJS)
 # 	$(CC) -o $@ $^ $(LIBS) $(CPPFLAG)
 
 %.o: %.cc
-	$(CC) -c $^ $(CPPFLAG) -I../cub-1.5.1
+	$(CC) -c $^ $(CPPFLAG) $(PARA) -I../cub-1.5.1
 
 %.o: %.cu
-	$(NVCC) -c $^ $(CPPFLAG) $(NVARCH)
+	$(NVCC) -c $^ $(CPPFLAG) $(PARA) $(NVARCH)
 
 t.cubin: kernels.cu kernels.cuh
 	$(NVCC) kernels.cu $(CPPFLAG) -arch sm_52 -use_fast_math -I../cub-1.5.1 -lineinfo  -cubin -o t.cubin -Xptxas=-v
@@ -32,7 +32,7 @@ ptx: kernels.cu
 	$(NVCC) kernels.cu $(CPPFLAG) -arch sm_52 -use_fast_math -I../cub-1.5.1 -lineinfo -ptx -o t.ptx -src-in-ptx
 
 dot: t.cubin
-	nvdisasm -c -fun 7 -cfg t.cubin | dot -o1.pdf -Tpdf
+	nvdisasm -c -fun 6 -cfg t.cubin | dot -o1.pdf -Tpdf
 
 clean:
 	rm -f *.o g

@@ -7,8 +7,9 @@ using namespace std;
 
 int main()
 {
-   ifstream fin("../gsieve/sample/_samples96p");
-   GSieve gs("../gsieve/basis/basis96p", cin);
+   // ifstream fin("../gsieve/sample/_samples96p");
+   ifstream fin("sample/96a");
+   GSieve gs("../gsieve/basis/basis102p", cin);
 
    gs.Start();
 }

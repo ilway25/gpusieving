@@ -1,0 +1,14 @@
+#!/usr/bin/python
+from subprocess import call
+import os
+
+# Rake, Times, ILP, InstLP
+#parameter = [(4,5,7,1), (4,5,6,1), (4,5,9,1), (4,5,10,1), (8,2,8,1), (8,2,8,2), (8,3,8,1)]
+parameter = [(16,1,1,2)]
+
+for (a,b,c,d) in parameter:
+   print a,b,c,d
+   #call(["make", "clean"])
+   call(["rm", "kernels.o"])
+   call(["make", '-j10', 'PARA=-DPAA=' + str(a) + ' -DPBB=' + str(b) + ' -DPCC=' + str(c) + ' -DPDD=' + str(d) + ''])
+   os.system('r | tee log102_%d%d%d%d' % (a,b,c,d))
