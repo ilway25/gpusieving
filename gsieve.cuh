@@ -60,7 +60,8 @@ private:
    Norm    best_norm;
    frowvec shortest_vec;
 
-   int iterations {0};
+   int iterations {};
+   int collisions {};
    sc::system_clock::time_point found_time, start_time;
    sc::milliseconds             duration {0};
 };

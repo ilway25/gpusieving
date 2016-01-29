@@ -197,8 +197,8 @@ GSieve::GSieve(string basis, istream& sample_stream)
 
       Q[i].InitGPU(NumSamples + 65536, i);
       Q2[i].InitGPU(NumSamples + 65536, i);
-      L[i].InitGPU(3500000, i);
-      L2[i].InitGPU(3500000, i);
+      L[i].InitGPU(4000000, i);
+      L2[i].InitGPU(4000000, i);
 
       CubDebugExit(cudaSetDevice(i));
       CubDebugExit(cudaStreamCreate(&streams[i]));
@@ -254,6 +254,8 @@ void GSieve::Start()
 {
    found_time = start_time = sc::system_clock::now();
 
+   auto last_saved = sc::system_clock::now();
+
    CubDebugExit(cudaSetDevice(0));
 
    Point* points;
@@ -267,30 +269,19 @@ void GSieve::Start()
 
    int min_L = 0; // Min list from last iteration
 
-   // Load("d50");
    for (; iterations < 50000; ++iterations)
    {
-      // if (iterations == 50)
+      // Save every 6 hours
+      // if (sc::duration_cast<sc::hours>(sc::system_clock::now() - last_saved) > sc::hours(6))
       // {
-      //    Save("d50");
-      //    break;
+      //    Save("log112/log112_it" + to_string(iterations));
+      //    last_saved = sc::system_clock::now();
       // }
 
       cout << "====== Iteration " << iterations << " ======" << endl;
 
-      // cout << "ListS: ";
-      // for (int i = 0; i < NGPUS; ++i)
-      //    cout << Lsize[i] << ' ';
-      // cout << endl;
-
       CubDebugExit(cudaSetDevice(0));
       GenerateSamples();
-
-      // Q[0].Print(NumSamples, "sample");
-
-      // minimize<<<GridDim, P>>>(Q[0].points, NumSamples);
-
-      // Q[0].Print(NumSamples, "sample-min");
 
       // Sort samples descending
       Q2[0].CopyFrom(Q[0], NumSamples);
@@ -305,7 +296,6 @@ void GSieve::Start()
       CubDebugExit(cudaSetDevice(0));
       CubDebugExit(cudaMemcpy(points, Q[0].points, sizeof(Point) * NumSamples, cudaMemcpyDefault));
       CubDebugExit(cudaMemcpy(norms, Q[0].norms, sizeof(Norm) * NumSamples, cudaMemcpyDefault));
-
 
       for (int i = 0; i < NGPUS; ++i)
       {
@@ -322,20 +312,10 @@ void GSieve::Start()
          CubDebugExit(cudaMemsetAsync(Q[i].norms + NumSamples, 0, 1024, streams[i]));
          CubDebugExit(cudaMemsetAsync(Q2[i].norms + NumSamples, 0, 1024, streams[i]));
 
-         // Q[i].Print(NumSamples, "Q-before-" + to_string(i));
-
          reduce<0><<<GridDim, BlockDim, 0, streams[i]>>>(Q[i].points, Q[i].norms, NumSamples, L[i].points, L[i].norms, Lsize[i]);
-
-         // Q[i].Print(NumSamples, "Q-" + to_string(i));
-         // minimize<<<GridDim, P, 0, streams[i]>>>(Q[i].points, NumSamples);
-         // Q[i].Print(NumSamples, "Qmin-" + to_string(i));
 
          Q2[i].CopyFromAsync(Q[i], NumSamples, streams[i]);
          reduce<1><<<GridDim, BlockDim, 0, streams[i]>>>(Q2[i].points, Q2[i].norms, NumSamples, Q[i].points, Q[i].norms, NumSamples);
-
-         // Q2[i].Print(NumSamples, "Q2-" + to_string(i));
-         // minimize<<<GridDim, P, 0, streams[i]>>>(Q2[i].points, NumSamples);
-         // Q2[i].Print(NumSamples, "Q2min-" + to_string(i));
 
          reduce<2><<<GridDim, BlockDim, 0, streams[i]>>>(L[i].points, L[i].norms, Lsize[i], Q2[i].points, Q2[i].norms, NumSamples);
 
@@ -352,13 +332,6 @@ void GSieve::Start()
          CubDebugExit(cudaSetDevice(i));
          CubDebugExit(cudaStreamSynchronize(streams[i]));
       }
-
-      // for (int i = 0; i < NGPUS; ++i)
-      // {
-      //    Q[i].Check(_Binv, NumSamples, "Q-" + to_string(i));
-      //    Q2[i].Check(_Binv, NumSamples, "Q2-" + to_string(i));
-      //    L[i].Check(_Binv, Lsize[i], "L-" + to_string(i));
-      // }
 
       // Put reduced vectors (INCLUDING collisions) onto stack
       for (int i = 0; i < NGPUS; ++i)
@@ -379,11 +352,6 @@ void GSieve::Start()
       }
 
       // Remove collisions from stack
-      // auto mid = partition(S.points, S.points + Ssize, [] (Point n) { return NotReduced()(n.norm()); } );
-      // partition(S.norms, S.norms + Ssize, [] (Norm n) { return NotReduced()(n); } );
-      // Ssize = mid - S.points;
-
-      // minimize<<<GridDim, CUB_ROUND_UP_NEAREST(P, 32)>>>(S.points, Ssize);
       {
          auto mid = partition(S.points, S.points + Ssize, [] (Point n) { return NotReduced()(n.norm()); } );
          Ssize = mid - S.points;
@@ -398,7 +366,7 @@ void GSieve::Start()
          CubDebugExit(cudaMemcpy(S.norms, norms, sizeof(Norm) * Ssize, cudaMemcpyDefault));
       }
 
-      cout << "NLS: ";
+      cout << "List Size: ";
       for (int i = 0; i < NGPUS; ++i)
          cout << Lsize[i] << ' ';
       cout << endl;
@@ -409,7 +377,6 @@ void GSieve::Start()
          // Not reduced -> collect and add to one list
          if (all_of(hostQ, hostQ + NGPUS, [=](const List& l) { return NotReduced()(l.norms[i]); }))
          {
-            // cout << "-NR: " << i << endl;
             points[cnt_nr] = hostQ[0].points[i];
             norms[cnt_nr] = hostQ[0].norms[i];
             ++cnt_nr;
@@ -431,25 +398,24 @@ void GSieve::Start()
             {
                tie(S.points[Ssize], S.norms[Ssize]) = Rectify(hostQ[argmin].points[i]);
 
-               // cout << "put to" << Ssize << ' ' << i << ' ' << S.norms[Ssize] << endl;
-
                if (*itmin < best_norm)
                {
                   best_norm = *itmin;
                   shortest_vec = ToVector(S.points[Ssize]);
 
-                  // found_time = system_clock::now();
+                  found_time = sc::system_clock::now();
                }
                ++Ssize;
                ++cnt_r;
-               // cout << "-R: " << i << endl;
             }
-            // else
-               // cout << "-C: " << i << endl;
          }
       }
-      cout << "NR: " << cnt_nr << "  R: " << cnt_r << "  C: " << NumSamples - cnt_nr - cnt_r << endl;
-      cout << "S:" << Ssize << endl;
+
+      int cnt_col = NumSamples - cnt_nr - cnt_r;
+      cout << "Not reduced: " << cnt_nr << "  Reduced: " << cnt_r << "  Collisions: " << cnt_col << endl;
+      cout << "Stack: " << Ssize << endl;
+
+      collisions += cnt_col;
 
       int min_L = min_element(Lsize, Lsize + NGPUS) - Lsize;
       cout << "Append to List " << min_L << endl;
@@ -458,15 +424,13 @@ void GSieve::Start()
       CubDebugExit(cudaMemcpy(L[min_L].norms + Lsize[min_L], norms, sizeof(Norm) * cnt_nr, cudaMemcpyDefault));
       Lsize[min_L] += cnt_nr;
 
+      cout << "Total Collisions: " << collisions << endl;
       printf("Min Norm = %.3f\n", best_norm);
       cout << '[';
       for (int i = 0; i < N; ++i)
          cout << shortest_vec[i] << ' ';
       cout << ']' << endl;
 
-      // for (int i = 0; i < NGPUS; ++i)
-      //    L[i].Print(Lsize[i], "L" + to_string(i));
-      // S.Print(Ssize, "S");
       auto tt = sc::system_clock::to_time_t(found_time);
       cout << "Found: " << ctime(&tt);
       tt = sc::system_clock::to_time_t(sc::system_clock::now());
@@ -538,7 +502,7 @@ void GSieve::Save(string filename)
    ofstream fout(filename.c_str());
    boost::archive::binary_oarchive oa(fout);
 
-   oa & iterations & best_norm;
+   oa & iterations & collisions & best_norm;
    oa & bs::make_binary_object(&duration, sizeof(duration));
 
    {
@@ -572,7 +536,7 @@ void GSieve::Load(string filename)
    ifstream fin(filename.c_str());
    boost::archive::binary_iarchive ia(fin);
 
-   ia & iterations & best_norm;
+   ia & iterations & collisions & best_norm;
    ia & bs::make_binary_object(&duration, sizeof(duration));
 
    {
